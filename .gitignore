@@ -1,0 +1,27 @@
+.pio
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+# Sensitive configuration files
+include/config.h
+include/secrets.h
+include/credentials.h
+include/auth.h
+include/*_secrets.*
+include/*_credentials.*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Local development files
+local_config.h
+device_secrets.h
+platformio_override.ini
+
+# Logs
+*.log
+upload_log.txt
