@@ -1,60 +1,83 @@
-#include <Arduino.h>
-
+#include <WiFi.h>
 #include <ThingerESP32.h>
+#include "config.h"
+// =====================
+// PIN DEFINITIONS
+// =====================
+#define SOIL_SENSOR_PIN 34      // Analog pin for moisture sensor
+#define PUMP_PIN 13             // Relay / transistor control pin
 
-#include <config.h>
+// =====================
+// SETTINGS
+// =====================
+const int DRY_THRESHOLD_PERCENT = 35;  // Activate pump when moisture is below 30%
+const int WET_THRESHOLD_PERCENT = 60;  // Stop pump when moisture is above 60%
+const int WATERING_TIME = 3000;        // Pump ON time in ms
 
-#define SOIL_MOISTURE_PIN 35
-#define BUCKET_ID "moisture-data-bucket-id"
-#define SEND_INTERVAL_MS 60000 // 60 seconds between bucket writes
+// Calibration values for soil moisture sensor
+const int DRY_VALUE = 3000;            // ADC value when soil is completely dry
+const int WET_VALUE = 1400;            // ADC value when soil is completely wet
 
 ThingerESP32 thing(USERNAME, DEVICE_ID, DEVICE_CREDENTIAL);
 
+int moistureValue = 0;
+int moisturePercent = 0;
+bool pumpState = false;
+
+// Function to calculate moisture percentage
+int getMoisturePercent(int rawValue) {
+  int percent = map(rawValue, DRY_VALUE, WET_VALUE, 0, 100);
+  return constrain(percent, 0, 100);
+}
+
+// Function to control pump based on moisture level
+void controlPump(int moisturePercent) {
+  // Turn pump ON if moisture is below dry threshold
+  if (moisturePercent < DRY_THRESHOLD_PERCENT && !pumpState) {
+    digitalWrite(PUMP_PIN, HIGH);  // Pump ON
+    pumpState = true;
+    Serial.println("*** PUMP ACTIVATED - Soil too dry! ***");
+  }
+  // Turn pump OFF if moisture is above wet threshold
+  else if (moisturePercent >= WET_THRESHOLD_PERCENT && pumpState) {
+    digitalWrite(PUMP_PIN, LOW);   // Pump OFF
+    pumpState = false;
+    Serial.println("*** PUMP DEACTIVATED - Soil is wet enough ***");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-  delay(1000);
 
-  pinMode(SOIL_MOISTURE_PIN, INPUT);
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, LOW);
 
-  // Add WiFi network
+  // Connect WiFi + Thinger
   thing.add_wifi(SSID, SSID_PASSWORD);
 
-  // Define soil moisture resource for Thinger and bucket writes
-  thing["soil_moisture"] >> [](pson& out){
-    int rawValue = analogRead(SOIL_MOISTURE_PIN);
-    float moisturePercent = (rawValue / 4095.0f) * 100.0f;
-    moisturePercent = roundf(moisturePercent); // Round to 0 decimal places
+  // Send sensor value to Thinger
+  thing["soil_moisture"] >> outputValue(moisturePercent);
 
-    out["raw"] = rawValue;
-    out["percent"] = moisturePercent;
-  };
+  // Send pump state to Thinger
+  // thing["pump_status"] >> outputValue(pumpState);
 }
 
 void loop() {
-  thing.handle();
+  // thing.handle();
 
-  static unsigned long lastSend = 0;
-  if (millis() - lastSend > SEND_INTERVAL_MS) {
-    int rawValue = analogRead(SOIL_MOISTURE_PIN);
-    float moisturePercent = (rawValue / 4095.0f) * 100.0f;
-    moisturePercent = roundf(moisturePercent); // Round to 0 decimal places
+  // Read moisture sensor
+  moistureValue = analogRead(SOIL_SENSOR_PIN);
+  moisturePercent = getMoisturePercent(moistureValue);
 
-    Serial.print("Soil moisture raw: ");
-    Serial.print(rawValue);
-    Serial.print("  percent: ");
-    Serial.print(moisturePercent, 0);
-    Serial.println(" %");
+  // Control pump based on moisture level
+  controlPump(moisturePercent);
 
-    if (thing.is_connected()) {
-      if (thing.write_bucket(BUCKET_ID, "soil_moisture")) {
-        Serial.println("Bucket write succeeded.");
-      } else {
-        Serial.println("Bucket write failed.");
-      }
-    } else {
-      Serial.println("Not connected to Thinger.io; skipping bucket write.");
-    }
+  Serial.print("Moisture Raw: ");
+  Serial.print(moistureValue);
+  Serial.print(" | Moisture %: ");
+  Serial.print(moisturePercent);
+  Serial.print("% | Pump: ");
+  Serial.println(pumpState ? "ON" : "OFF");
 
-    lastSend = millis();
-  }
+  delay(2000); // Check every 2 seconds
 }
